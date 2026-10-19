@@ -145,5 +145,17 @@ const oauth = new OAuthProvider({
 });
 
 export default {
-  fetch: (request: Request, env: Env, ctx: ExecutionContext) => oauth.fetch(request, env, ctx),
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Every registration writes to KV and needs no login, so cap it per IP before it reaches the OAuth provider.
+    if (env.REGISTER_LIMIT && request.method === 'POST' && new URL(request.url).pathname === '/register') {
+      const { success } = await env.REGISTER_LIMIT.limit({ key: request.headers.get('cf-connecting-ip') ?? 'unknown' });
+      if (!success) {
+        return Response.json(
+          { error: 'too_many_requests', error_description: 'Too many registrations from this address. Try again in a minute.' },
+          { status: 429, headers: { 'retry-after': '60', 'cache-control': 'no-store' } },
+        );
+      }
+    }
+    return oauth.fetch(request, env, ctx);
+  },
 };
