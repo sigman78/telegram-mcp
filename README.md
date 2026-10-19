@@ -82,7 +82,7 @@ More in [SECURITY.md](SECURITY.md).
 - **Unofficial use of Telegram's API.** It uses your own `api_id`, like any third-party client. Telegram can still restrict accounts that behave like scrapers, so keep call volume modest. Heavy use triggers `FLOOD_WAIT`; tool results say so.
 - **Not covered:** secret chats (they live on one device only), media contents (shown as labels such as `[photo]` or `[voice note 12s]`), and any sending.
 - **One person per deployment.** Each deployment holds a live login to one account.
-- **Cost.** The bundle is ~420 KiB gzipped and does no heavy work, so the Workers free plan may be enough. That has not been tried under real use.
+- **Cost.** The bundle is ~710 KiB gzipped (the free plan allows 3 MiB) and does no heavy work, so the Workers free plan may be enough. That has not been tried under real use.
 
 ## Configuration
 
