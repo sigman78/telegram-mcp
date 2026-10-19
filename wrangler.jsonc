@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "telegram-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"], // the second enables Client ID Metadata Documents for MCP clients that use them
+  "observability": { "enabled": true },
+
+  // mtcute does its crypto in wasm. workerd can't compile wasm from bytes at runtime, so the .wasm is imported as a module.
+  "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }],
+
+  // One Durable Object holds the Telegram login (its SQLite) and the live connection.
+  "durable_objects": { "bindings": [{ "name": "TG", "class_name": "TelegramSession" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TelegramSession"] }],
+
+  // The OAuth provider's token store. Create it, then paste the id:
+  //   npx wrangler kv namespace create OAUTH_KV
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }]
+
+  // Secrets (npx wrangler secret put NAME): TG_API_ID, TG_API_HASH (from my.telegram.org), OWNER_PASSWORD (12+ characters).
+  // Optional var: "vars": { "TIMEZONE": "Europe/Berlin" }  (defaults to UTC)
+}

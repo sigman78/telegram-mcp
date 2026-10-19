@@ -1,0 +1,15 @@
+# dependencies and build output
+node_modules/
+dist/
+.wrangler/
+
+# local secrets and per-deployment config (your KV id, domain, ...)
+.dev.vars
+.env
+.env.*
+wrangler.local.jsonc
+
+# misc
+*.log
+.DS_Store
+Thumbs.db

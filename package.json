@@ -1,0 +1,37 @@
+{
+  "name": "telegram-mcp",
+  "version": "0.1.0",
+  "description": "A read-only MCP server over your own Telegram account, running on Cloudflare Workers.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sigman78/telegram-mcp.git"
+  },
+  "keywords": ["mcp", "telegram", "mtproto", "mtcute", "cloudflare-workers", "durable-objects", "model-context-protocol"],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:local": "wrangler deploy -c wrangler.local.jsonc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.mts\""
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "0.7.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@mtcute/core": "0.30.3",
+    "@mtcute/wasm": "0.30.3",
+    "@mtcute/web": "0.30.3",
+    "qrcode-generator": "2.0.4",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.151.1"
+  }
+}
