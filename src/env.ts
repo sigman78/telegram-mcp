@@ -5,6 +5,8 @@ export interface Env {
   TG: DurableObjectNamespace<TelegramSession>;
   OAUTH_KV: KVNamespace;
   OAUTH_PROVIDER: OAuthHelpers;
+  /** Caps client registrations per IP (see wrangler.jsonc). Optional: unset means no cap. */
+  REGISTER_LIMIT?: RateLimit;
   /** From my.telegram.org, "API development tools". Secrets. */
   TG_API_ID: string;
   TG_API_HASH: string;

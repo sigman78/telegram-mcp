@@ -70,7 +70,7 @@ Your Telegram session is a key to your whole account. Treat a deployment like a 
 - Password guesses are throttled, but that slows a guesser and does not stop one. **The strength of the password is the real protection.**
 - Browser sessions last 14 days and cannot be revoked individually; changing `OWNER_PASSWORD` signs everything out.
 - Any approved client can call `relink`.
-- Anyone can hit the public endpoints, so an attacker could use up the free KV write quota and lock you out for a day. A Cloudflare rate-limit rule on `/register` helps.
+- Client registration writes to KV and needs no login, so it is capped at 10 per minute per IP (the `ratelimits` binding in `wrangler.jsonc`). The cap is approximate, so a determined flood could still use up the free KV write quota and lock you out until it resets.
 - This uses Telegram's API unofficially, with your own `api_id`. Keep call volume modest; heavy use triggers `FLOOD_WAIT`.
 - To end access: remove the device in Telegram (*Settings > Devices*), call `relink`, or delete the Worker.
 
