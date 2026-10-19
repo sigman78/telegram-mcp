@@ -8,7 +8,6 @@ import type { Env } from './env.js';
 
 const enc = new TextEncoder();
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
-const randomId = () => hex(crypto.getRandomValues(new Uint8Array(16)).buffer);
 
 async function hmac(key: string, msg: string) {
   const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
@@ -29,29 +28,60 @@ export interface Pending {
   client?: { name: string; host: string };
 }
 
-/** Park what we need after sign-in. Returns its id and the URL that starts it. */
-export async function startSignIn(env: Env, origin: string, pending: Pending): Promise<{ id: string; url: string }> {
-  const id = randomId();
-  await env.OAUTH_KV.put(`pending:${id}`, JSON.stringify(pending), { expirationTtl: 3600 });
-  return { id, url: `${origin}/login?p=${id}` };
+/** JSON <-> base64url, safe for non-Latin1 text (a plain btoa throws on it). */
+export function pack(o: unknown): string {
+  let bin = '';
+  for (const b of enc.encode(JSON.stringify(o))) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+export function unpack(s: string): any {
+  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+}
+
+const PENDING_SECONDS = 3600;
+const PENDING_MAX_CHARS = 6000;
+
+/**
+ * What a sign-in is waiting on travels in the sign-in URL itself, signed with the owner password, so starting one
+ * writes nothing: an anonymous visitor can't use up the KV write quota with it. The cost is that a link can be
+ * reused until it expires (an hour); using it still takes the password, in the browser that started it.
+ * Returns null if the password isn't set up or the request is too large to carry.
+ */
+export async function startSignIn(env: Env, origin: string, pending: Pending): Promise<{ id: string; url: string } | null> {
+  const key = secret(env);
+  if (!key) return null;
+  const body = pack({ exp: Date.now() + PENDING_SECONDS * 1000, pending });
+  const p = `${body}.${(await hmac(key, `pending:${body}`)).slice(0, 32)}`;
+  if (p.length > PENDING_MAX_CHARS) return null;
+  return { id: await pendingTag(p), url: `${origin}/login?p=${p}` };
+}
+
+/** A short stable name for one sign-in, used in the cookie name (the sign-in itself is too long for that). */
+export async function pendingTag(p: string): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', enc.encode(p))).slice(0, 24);
 }
 
 /**
  * An approval request is tied to the browser that made it: /authorize sets this cookie, and /login insists on it.
  * Without it, anyone could start a request for their own client and hand the owner the resulting sign-in link.
  */
-export const pendingCookieName = (id: string) => `tg_pend_${id}`;
-export const pendingCookie = (id: string, maxAge = 3600) =>
-  `${pendingCookieName(id)}=1; Path=/login; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
+export const pendingCookieName = (tag: string) => `tg_pend_${tag}`;
+export const pendingCookie = (tag: string, maxAge = PENDING_SECONDS) =>
+  `${pendingCookieName(tag)}=1; Path=/login; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
 
-export async function peekPending(env: Env, id: string): Promise<Pending | null> {
-  const raw = await env.OAUTH_KV.get(`pending:${id}`);
-  return raw ? JSON.parse(raw) : null;
-}
-export async function takePending(env: Env, id: string) {
-  const p = await peekPending(env, id);
-  if (p) await env.OAUTH_KV.delete(`pending:${id}`);
-  return p;
+/** The signed request carried by `?p=`, or null if it is forged, expired or malformed. */
+export async function readPending(env: Env, p: string): Promise<Pending | null> {
+  const key = secret(env);
+  const [body, sig] = p.split('.');
+  if (!key || !body || !sig || p.length > PENDING_MAX_CHARS) return null;
+  if (!(await sameSecret(sig, (await hmac(key, `pending:${body}`)).slice(0, 32)))) return null;
+  try {
+    const { exp, pending } = unpack(body);
+    return Number(exp) >= Date.now() ? (pending as Pending) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A 30 minute bearer token for the link page. */

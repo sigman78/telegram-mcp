@@ -14,8 +14,12 @@ This server holds a **Telegram session**, which is a full-access credential for 
 
 - MCP client registration is open (dynamic client registration), as the MCP specification expects. Anyone can register a client and ask for approval; the owner must read the approval screen. A fake display name is possible; the redirect host is shown next to it.
 - The password throttle slows guessing but cannot stop a distributed attacker. Use a long, random `OWNER_PASSWORD`.
+- Starting a sign-in writes nothing, but `/register` and the token endpoints do write to KV. A flood of requests can exhaust the free plan's daily KV write quota and lock the owner out until it resets. A Cloudflare rate-limit rule on `/register` mitigates this.
+- A sign-in link is valid for an hour and can be reused within that time, but using it still takes the password, in the browser that started it.
+- Browser sessions (14 days) cannot be revoked individually; rotate `OWNER_PASSWORD` to sign everything out.
+- Any approved MCP client can call `relink`, which logs the Telegram session out.
 - Telegram may restrict accounts whose API use looks like scraping. Keep call volume modest.
 
 ## Reporting a vulnerability
 
-This is a private project for now. If you have access and find a problem, open a private advisory under the repository's **Security** tab, or contact the owner directly. Please do not put exploit details in public issues.
+Please report problems privately: open an advisory under this repository's **Security** tab ("Report a vulnerability"). Do not put exploit details in public issues.

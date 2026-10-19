@@ -10,8 +10,8 @@ import { TelegramSession } from './telegram-do.js';
 import { handleMcp } from './mcp.js';
 import { consentPage, landingPage, linkPage, loginPage, messagePage } from './pages.js';
 import {
-  isOwnerToken, mintSession, peekPending, pendingCookie, pendingCookieName, sessionCookie, sessionToken, SESSION_COOKIE, startSignIn,
-  takePending, tokenFromPassword,
+  isOwnerToken, mintSession, pack, pendingCookie, pendingCookieName, pendingTag, readPending, sessionCookie, sessionToken, SESSION_COOKIE,
+  startSignIn, tokenFromPassword, unpack,
 } from './auth.js';
 import type { Env } from './env.js';
 
@@ -20,8 +20,6 @@ export { TelegramSession };
 const html = (body: string, status = 200) => new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
 const tg = (env: Env) => env.TG.get(env.TG.idFromName('owner'));
-const b64 = (o: unknown) => btoa(JSON.stringify(o));
-const unb64 = (s: string) => JSON.parse(atob(s));
 const cookieValue = (r: Request, name: string) => r.headers.get('cookie')?.split(/;\s*/).find((c) => c.startsWith(`${name}=`))?.slice(name.length + 1);
 const bearer = (r: Request) => r.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
 const plain = (title: string, msg: string, status: number, headers: Record<string, string> = {}) => {
@@ -41,20 +39,21 @@ async function completeOauth(env: Env, oauth: unknown) {
 }
 
 /** The owner is verified. Remember this browser, then finish the MCP grant if Telegram is linked, else go on to the QR screen. */
-async function proceed(env: Env, pendingId: string, token: string): Promise<Response> {
-  const pending = await takePending(env, pendingId);
+async function proceed(env: Env, p: string, token: string): Promise<Response> {
+  const pending = await readPending(env, p);
   if (!pending) return plain('Sign-in expired', 'Start again from the app that asked.', 400);
   const session = await mintSession(env);
+  const tag = await pendingTag(p);
   const remember = (res: Response) => {
     const out = new Response(res.body, res);
     if (session) out.headers.append('set-cookie', sessionCookie(session.value, session.maxAge));
-    out.headers.append('set-cookie', pendingCookie(pendingId, 0)); // this request is spent
+    out.headers.append('set-cookie', pendingCookie(tag, 0)); // done with this browser binding
     return out;
   };
   if (pending.oauth && (await tg(env).isLinked())) {
     return remember(new Response(null, { status: 302, headers: { location: await completeOauth(env, pending.oauth) } }));
   }
-  return remember(html(linkPage(token, pending.oauth ? b64(pending.oauth) : null)));
+  return remember(html(linkPage(token, pending.oauth ? pack(pending.oauth) : null)));
 }
 
 const ownerHandler = {
@@ -71,26 +70,33 @@ const ownerHandler = {
 
     // An MCP client wants in: show who is asking, then send the owner to sign in.
     if (path === '/authorize') {
-      const oauth = await env.OAUTH_PROVIDER.parseAuthRequest(request);
-      const client = await env.OAUTH_PROVIDER.lookupClient(oauth.clientId);
-      const who = { name: client?.clientName ?? 'An app', host: hostOf(oauth.redirectUri) };
-      const { id, url: signInUrl } = await startSignIn(env, url.origin, { oauth, client: who });
-      const res = html(consentPage(who.name, who.host, signInUrl));
-      res.headers.append('set-cookie', pendingCookie(id)); // ties this request to this browser
+      let oauth: Awaited<ReturnType<typeof env.OAUTH_PROVIDER.parseAuthRequest>>;
+      try {
+        oauth = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+      } catch {
+        return plain('Invalid request', 'This approval request is not valid. Start again from the app that asked.', 400);
+      }
+      const client = oauth.clientId ? await env.OAUTH_PROVIDER.lookupClient(oauth.clientId) : null;
+      if (!client) return plain('Unknown app', 'This request names no registered app. Start again from the app that asked.', 400);
+      const who = { name: client.clientName ?? 'An app', host: hostOf(oauth.redirectUri) };
+      const started = await startSignIn(env, url.origin, { oauth, client: who });
+      if (!started) return plain('Cannot start sign-in', 'The OWNER_PASSWORD secret is missing (12+ characters), or this request is too large.', 503);
+      const res = html(consentPage(who.name, who.host, started.url));
+      res.headers.append('set-cookie', pendingCookie(started.id)); // ties this request to this browser
       return res;
     }
     if (path === '/setup') {
-      return (await sessionToken(env, cookieValue(request, SESSION_COOKIE)))
-        ? Response.redirect(`${url.origin}/`, 302)
-        : Response.redirect((await startSignIn(env, url.origin, {})).url, 302);
+      if (await sessionToken(env, cookieValue(request, SESSION_COOKIE))) return Response.redirect(`${url.origin}/`, 302);
+      const started = await startSignIn(env, url.origin, {});
+      return started ? Response.redirect(started.url, 302) : plain('Not set up', 'Set the OWNER_PASSWORD secret (12+ characters) and reload.', 503);
     }
 
     if (path === '/login') {
       if (!env.OWNER_PASSWORD || env.OWNER_PASSWORD.length < 12) return plain('Not set up', 'Set the OWNER_PASSWORD secret (12+ characters) and reload.', 503);
-      const pending = await peekPending(env, p);
+      const pending = await readPending(env, p);
       if (!pending) return plain('Sign-in expired', 'Start again from the setup page.', 400);
       // An approval request only continues in the browser that started it, so a forwarded link cannot approve someone else's app.
-      if (pending.oauth && !cookieValue(request, pendingCookieName(p))) {
+      if (pending.oauth && !cookieValue(request, pendingCookieName(await pendingTag(p)))) {
         return plain('Wrong browser', 'This approval link belongs to another browser session. Start again from the app that wants access, in this browser.', 403);
       }
       if (request.method !== 'POST') return html(loginPage(url.pathname + url.search, undefined, pending.client));
@@ -118,7 +124,7 @@ const ownerHandler = {
         if (path === '/link/finish') {
           if (!(await tg(env).isLinked())) return json({ error: 'not linked' }, 409);
           const { req } = (await request.json()) as { req: string };
-          return json({ redirectTo: await completeOauth(env, unb64(req)) });
+          return json({ redirectTo: await completeOauth(env, unpack(req)) });
         }
       }
     }
